@@ -1,0 +1,15 @@
+# Discord bot dependencies
+discord.py>=2.3.0
+
+# HTTP client for API requests (Mistral AI)
+aiohttp>=3.9.0
+
+# System monitoring (optional but recommended)
+psutil>=5.9.0
+
+# GPU monitoring (optional, install if you have GPU)
+gputil>=1.4.0
+
+# Environment variables support
+python-dotenv>=1.0.0
+
