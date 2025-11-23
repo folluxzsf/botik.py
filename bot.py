@@ -4707,7 +4707,7 @@ if __name__ == "__main__":
     print("[Bot] Запуск бота...")
     print(f"[Bot] Токен: {'*' * 20}...{TOKEN[-10:] if len(TOKEN) > 10 else 'INVALID'}")
     try:
-        bot.run(TOKEN, log_handler=None)
+        bot.run(TOKEN, log_handler=None, reconnect=True)
     except KeyboardInterrupt:
         print("[Bot] Остановка бота по запросу пользователя")
     except Exception as e:
