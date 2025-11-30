@@ -111,7 +111,7 @@ if gputil_spec:
     except Exception:
         GPUtil = None
 
-TOKEN = ""
+TOKEN = "TOKEN"
 LOG_CHANNEL_ID = 1437894172035252266  # ID текстового канала для логов
 PROJECT_BIRTHDAY_CHANNEL_ID = 0  # 0 = использовать лог-канал
 PROJECT_BIRTHDAY_MONTH = 11
