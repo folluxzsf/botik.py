@@ -162,11 +162,12 @@ TELEGRAM_BOT_TOKEN = "8235791338:AAGtsqzeV8phGsLu39WLpqgxXIK2rsqc0kc"
 TELEGRAM_CHAT_ID = 8165572851  # например, 123456789
 TELEGRAM_TICKET_LOG_CHAT_ID = 8165572851  # чат для логирования тикето
 # Нейросеть через Bothost.ru API
-# Bothost.ru предоставляет доступ к AI моделям
+# Bothost.ru предоставляет доступ к AI моделям с OpenAI-совместимым API
 # Получить API ключ: https://bothost.ru/api-keys/
+# Для хостинга Bothost.ru установите переменную окружения MISTRAL_API_KEY в настройках проекта
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "dEpuO1P9PTLxkk2Tae9XftblYeiqsSub")  # API ключ от bothost.ru
-MISTRAL_API_URL = "https://api.bothost.ru/v1/chat/completions"
-MISTRAL_MODEL = "mistral-small"  # Модель, которая понимает русский
+MISTRAL_API_URL = "https://api.bothost.ru/v1/chat/completions"  # OpenAI-совместимый endpoint
+MISTRAL_MODEL = "mistral-small"  # Модель, которая понимает русский (может быть изменена на другую поддерживаемую bothost.ru)
 ASK_COMMAND_RATE_LIMIT_SECONDS =5  # Минимальный интервал между запросами в секундах (1 минута, глобальный лимит для всех)
 ASK_COMMAND_CHANNEL_ID = 1441828197644894329  # ID канала, где разрешена команда !ask (0 = любой канал, укажите ID канала для ограничения)
 AI_ENABLED = True  # Состояние AI (включен/выключен)
@@ -4854,10 +4855,16 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
     try:
         # Проверяем наличие API ключа
         if not MISTRAL_API_KEY:
-            await loading_msg.edit(embed=make_embed("Ошибка", "🚫 API ключ  не настроен.", color=0xED4245))
+            await loading_msg.edit(embed=make_embed(
+                "Ошибка", 
+                "🚫 API ключ от Bothost.ru не настроен.\n\n"
+                "Установите переменную окружения `MISTRAL_API_KEY` в настройках проекта на Bothost.ru.\n"
+                "Получить API ключ: https://bothost.ru/api-keys/",
+                color=0xED4245
+            ))
             return
         
-        # Подготавливаем данные для запроса к Bothost.ru API
+        # Подготавливаем данные для запроса к Bothost.ru API (OpenAI-совместимый формат)
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {MISTRAL_API_KEY}"
@@ -4896,6 +4903,7 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
                         data = await response.json() if response_text else {}
                         
                         # Bothost.ru API возвращает ответ в формате OpenAI {"choices": [{"message": {"content": "..."}}]}
+                        # Формат полностью совместим с OpenAI API
                         if "choices" in data and len(data["choices"]) > 0:
                             answer = data["choices"][0].get("message", {}).get("content", "")
                         else:
@@ -4910,13 +4918,24 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
                     except (KeyError, IndexError, ValueError) as e:
                         raise Exception(f"Ошибка парсинга ответа: {str(e)}")
                 else:
-                    # Обработка ошибок
+                    # Обработка ошибок Bothost.ru API
                     try:
                         error_json = await response.json() if response_text else {}
                         error_message = error_json.get("message", error_json.get("error", response_text[:200])) if isinstance(error_json, dict) else response_text[:200]
+                        
+                        # Специальная обработка типичных ошибок API
+                        if response.status == 401:
+                            error_message = "Неверный API ключ. Проверьте переменную окружения MISTRAL_API_KEY на Bothost.ru"
+                        elif response.status == 429:
+                            error_message = "Превышен лимит запросов. Попробуйте позже."
+                        elif response.status == 500:
+                            error_message = "Временная ошибка сервера Bothost.ru. Попробуйте позже."
+                        
                         raise Exception(f"HTTP {response.status}: {error_message}")
-                    except:
-                        raise Exception(f"HTTP {response.status}: {response_text[:200]}")
+                    except Exception as e:
+                        if "HTTP" not in str(e):
+                            raise Exception(f"HTTP {response.status}: {response_text[:200] if response_text else 'Неизвестная ошибка'}")
+                        raise
         
         if not answer:
             raise Exception("Не удалось получить ответ от API")
@@ -4976,24 +4995,28 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
             await loading_msg.edit(embed=embed)
             
     except aiohttp.ClientError as e:
-        error_msg = f"🚫 Ошибка соединения с API: {str(e)[:500]}"
-        await loading_msg.edit(embed=make_embed("Ошибка", error_msg, color=0xED4245))
+        error_msg = f"🚫 Ошибка соединения с Bothost.ru API: {str(e)[:500]}"
+        await loading_msg.edit(embed=make_embed(
+            "Ошибка соединения", 
+            error_msg + "\n\nПроверьте:\n• Интернет-соединение\n• Доступность api.bothost.ru\n• Настройки прокси (если используются)",
+            color=0xED4245
+        ))
     except Exception as e:
         error_msg = "🚫 Произошла ошибка при обращении к AI."
         error_str = str(e).lower()
         error_full = str(e)
         
-        # Обрабатываем специфичные ошибки
+        # Обрабатываем специфичные ошибки Bothost.ru API
         if "401" in error_full or "unauthorized" in error_str or "authentication" in error_str:
-            error_msg = "🚫 Неверный API ключ Hugging Face (если указан)."
+            error_msg = "🚫 Неверный API ключ Bothost.ru.\n\nПроверьте переменную окружения MISTRAL_API_KEY в настройках проекта на Bothost.ru."
         elif "429" in error_full or "rate limit" in error_str:
             error_msg = "⏱️ Превышен лимит запросов. Попробуйте позже."
         elif "таймаут" in error_str or "timeout" in error_str:
             error_msg = "⏱️ Превышено время ожидания ответа от API. Попробуйте позже."
         elif "403" in error_full or "forbidden" in error_str:
-            error_msg = "🚫 Доступ запрещён. Возможные причины:\n• Модель недоступна"
+            error_msg = "🚫 Доступ запрещён к Bothost.ru API.\n\nВозможные причины:\n• Модель недоступна\n• Недостаточно прав API ключа"
         elif "model" in error_str and "not found" in error_str:
-            error_msg = "🚫 Модель недоступна. Попробуйте другую модель."
+            error_msg = "🚫 Модель недоступна на Bothost.ru.\n\nПроверьте доступность модели 'mistral-small' или измените MISTRAL_MODEL в коде."
         elif "invalid" in error_str and "key" in error_str:
             error_msg = "🚫 Неверный формат API ключа."
         else:
