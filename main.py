@@ -15,6 +15,7 @@ from pathlib import Path
 from collections import defaultdict, deque
 
 import aiohttp
+import ssl
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -4889,7 +4890,13 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
         }
         
         # Отправляем запрос к Bothost.ru API
-        async with aiohttp.ClientSession() as session:
+        # Создаем SSL контекст без проверки сертификата (для работы с bothost.ru)
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(
                 MISTRAL_API_URL,
                 headers=headers,
