@@ -111,7 +111,23 @@ if gputil_spec:
     except Exception:
         GPUtil = None
 
-TOKEN = "TOKEN"
+# Рекомендуется использовать BOT_TOKEN из переменных окружения
+TOKEN = os.getenv('BOT_TOKEN')
+
+# Проверка наличия токена
+if not TOKEN:
+    print("❌ Токен не найден! Проверьте переменные окружения.")
+    print("Убедитесь, что установлена переменная BOT_TOKEN")
+    exit(1)
+
+# Проверка формата Discord токена
+if '.' not in TOKEN or len(TOKEN) < 50:
+    print(f"❌ Неверный формат токена: длина={len(TOKEN)}")
+    print("Discord токены обычно имеют длину 59-70 символов и содержат точки (.)")
+    exit(1)
+
+print(f"✅ Токен найден: {TOKEN[:10]}...{TOKEN[-5:]}")
+
 LOG_CHANNEL_ID = 1437894172035252266  # ID текстового канала для логов
 PROJECT_BIRTHDAY_CHANNEL_ID = 0  # 0 = использовать лог-канал
 PROJECT_BIRTHDAY_MONTH = 11
@@ -5812,13 +5828,24 @@ async def setup_hook():
 
 if __name__ == "__main__":
     print("[Bot] Запуск бота...")
-    print(f"[Bot] Токен: {'*' * 20}...{TOKEN[-10:] if len(TOKEN) > 10 else 'INVALID'}")
+    token_display = f"{'*' * 20}...{TOKEN[-10:]}" if len(TOKEN) > 10 else "INVALID"
+    print(f"[Bot] Токен: {token_display}")
+    
     try:
         bot.run(TOKEN, log_handler=None)
+    except discord.errors.LoginFailure as e:
+        print(f"[Bot] Критическая ошибка при запуске: {e}")
+        print("❌ Неверный токен Discord бота!")
+        print("Проверьте:")
+        print("1. Правильность токена в Discord Developer Portal")
+        print("2. Что переменная BOT_TOKEN установлена в настройках бота")
+        print("3. Что токен скопирован полностью (без пробелов)")
+        exit(1)
     except KeyboardInterrupt:
         print("[Bot] Остановка бота по запросу пользователя")
     except Exception as e:
         print(f"[Bot] Критическая ошибка при запуске: {e}")
         import traceback
         traceback.print_exc()
+        exit(1)
 
