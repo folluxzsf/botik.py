@@ -145,11 +145,11 @@ MSK_TZ = timezone(timedelta(hours=3))
 TELEGRAM_BOT_TOKEN = "8235791338:AAGtsqzeV8phGsLu39WLpqgxXIK2rsqc0kc"
 TELEGRAM_CHAT_ID = 8165572851  # например, 123456789
 TELEGRAM_TICKET_LOG_CHAT_ID = 8165572851  # чат для логирования тикето
-# Бесплатная нейросеть через Mistral AI API (полностью бесплатно)
-# Mistral AI предоставляет бесплатный доступ к моделям, которые понимают русский язык
-# Получить бесплатный ключ: https://console.mistral.ai/api-keys/ (полностью бесплатно)
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "dEpuO1P9PTLxkk2Tae9XftblYeiqsSub")  # Нужен API ключ (полностью бесплатно)
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+# Нейросеть через Bothost.ru API
+# Bothost.ru предоставляет доступ к AI моделям
+# Получить API ключ: https://bothost.ru/api-keys/
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "dEpuO1P9PTLxkk2Tae9XftblYeiqsSub")  # API ключ от bothost.ru
+MISTRAL_API_URL = "https://api.bothost.ru/v1/chat/completions"
 MISTRAL_MODEL = "mistral-small"  # Модель, которая понимает русский
 ASK_COMMAND_RATE_LIMIT_SECONDS =5  # Минимальный интервал между запросами в секундах (1 минута, глобальный лимит для всех)
 ASK_COMMAND_CHANNEL_ID = 1441828197644894329  # ID канала, где разрешена команда !ask (0 = любой канал, укажите ID канала для ограничения)
@@ -4841,7 +4841,7 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
             await loading_msg.edit(embed=make_embed("Ошибка", "🚫 API ключ  не настроен.", color=0xED4245))
             return
         
-        # Подготавливаем данные для запроса к Mistral AI API
+        # Подготавливаем данные для запроса к Bothost.ru API
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {MISTRAL_API_KEY}"
@@ -4865,7 +4865,7 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
             "temperature": 0.7
         }
         
-        # Отправляем запрос к Mistral AI API
+        # Отправляем запрос к Bothost.ru API
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 MISTRAL_API_URL,
@@ -4879,7 +4879,7 @@ async def gpt_command(ctx: commands.Context, *, prompt: str):
                     try:
                         data = await response.json() if response_text else {}
                         
-                        # Mistral возвращает ответ в формате OpenAI {"choices": [{"message": {"content": "..."}}]}
+                        # Bothost.ru API возвращает ответ в формате OpenAI {"choices": [{"message": {"content": "..."}}]}
                         if "choices" in data and len(data["choices"]) > 0:
                             answer = data["choices"][0].get("message", {}).get("content", "")
                         else:
@@ -5821,8 +5821,4 @@ if __name__ == "__main__":
         print(f"[Bot] Критическая ошибка при запуске: {e}")
         import traceback
         traceback.print_exc()
-        raise
-    finally:
-        # Снимаем блокировку спящего режима при завершении
-        stop_sleep_prevention()
 
