@@ -4193,181 +4193,100 @@ async def unmuteticket_command(ctx: commands.Context, member: discord.Member, *,
 @bot.command(name="mute-voice")
 async def mute_voice_command(ctx: commands.Context, *, args: str = ""):
     log_command("MODERATION", "!mute-voice", ctx.author, ctx.guild)
+    # Парсим аргументы: id/@mention время причина
+    parts = args.strip().split()
+    if not parts:
+        await ctx.send(embed=make_embed("Использование", "`!mute-voice <id/@user> <время> <причина>`\nПример: `!mute-voice @user 1h Нарушение правил`\nПример: `!mute-voice 123456789 30m Спам`", color=0xFEE75C))
+        return
+    
+    # Пытаемся найти пользователя по первому аргументу
+    user_input = parts[0]
+    member = None
+    
+    # Проверяем, является ли это упоминанием
+    if user_input.startswith("<@") and user_input.endswith(">"):
+        # Это упоминание, извлекаем ID
+        user_id_str = user_input[2:-1]
+        if user_id_str.startswith("!"):
+            user_id_str = user_id_str[1:]
+        try:
+            user_id = int(user_id_str)
+            member = ctx.guild.get_member(user_id)
+        except ValueError:
+            pass
+    else:
+        # Пытаемся распарсить как ID
+        try:
+            user_id = int(user_input)
+            member = ctx.guild.get_member(user_id)
+        except ValueError:
+            pass
+    
+    if member is None:
+        await ctx.send(embed=make_embed("Ошибка", "⚠️ Пользователь не найден. Укажите ID или упомяните пользователя.", color=0xED4245))
+        return
+    
+    # Проверяем права
     try:
-        # Парсим аргументы: id/@mention время причина
-        parts = args.strip().split()
-        if not parts:
-            await ctx.send(embed=make_embed("Использование", "`!mute-voice <id/@user> <время> <причина>`\nПример: `!mute-voice @user 1h Нарушение правил`\nПример: `!mute-voice 123456789 30m Спам`", color=0xFEE75C))
-            return
-        
-        # Пытаемся найти пользователя по первому аргументу
-        user_input = parts[0]
-        member = None
-        
-        # Проверяем, является ли это упоминанием
-        if user_input.startswith("<@") and user_input.endswith(">"):
-            # Это упоминание, извлекаем ID
-            user_id_str = user_input[2:-1]
-            if user_id_str.startswith("!"):
-                user_id_str = user_id_str[1:]
-            try:
-                user_id = int(user_id_str)
-                member = ctx.guild.get_member(user_id)
-            except ValueError:
-                pass
-        else:
-            # Пытаемся распарсить как ID
-            try:
-                user_id = int(user_input)
-                member = ctx.guild.get_member(user_id)
-            except ValueError:
-                pass
-        
-        if member is None:
-            await ctx.send(embed=make_embed("Ошибка", "⚠️ Пользователь не найден. Укажите ID или упомяните пользователя.", color=0xED4245))
-            return
-        
-        # Проверяем права
-        try:
-            allowed = await ensure_moderation_rights(ctx, member, "mute_members", "мут голоса")
-        except commands.CommandError as err:
-            await ctx.send(embed=make_embed("Ошибка", f"🚫 {err}", color=0xED4245))
-            return
-        if not allowed:
-            return
-        
-        # Парсим время и причину из оставшихся аргументов
-        remaining_args = " ".join(parts[1:])
-        if not remaining_args.strip():
-            await ctx.send(embed=make_embed("Ошибка", "⚠️ Укажите время мута. Например: `1h`, `30m`, `1d`", color=0xED4245))
-            return
-        
-        duration, reason = extract_duration_and_reason(remaining_args, "Нарушение правил")
-        if not duration:
-            await ctx.send(embed=make_embed("Ошибка", "⚠️ Укажите время мута. Например: `1h`, `30m`, `1d`", color=0xED4245))
-            return
-        
-        # Проверяем, находится ли пользователь в голосовом канале
-        if not member.voice or not member.voice.channel:
-            await ctx.send(embed=make_embed("Ошибка", f"⚠️ {member.mention} не находится в голосовом канале.", color=0xED4245))
-            return
-        
-        # Выдаем мут в голосовом канале
-        try:
-            await member.edit(mute=True, reason=f"{ctx.author} — {reason}")
-        except discord.Forbidden:
-            await ctx.send(embed=make_embed("Ошибка", "🚫 Не удалось выдать мут. Проверьте права бота (нужно право 'Mute Members').", color=0xED4245))
-            return
-        except discord.HTTPException as e:
-            await ctx.send(embed=make_embed("Ошибка", f"🚫 Произошла ошибка при выдаче мута: {e}", color=0xED4245))
-            return
-        
-        # Сохраняем информацию о муте
-        expires_at = utc_now() + duration
-        voice_mutes[member.id] = {
-            "expires_at": expires_at.isoformat(),
-            "reason": reason,
-            "moderator_id": ctx.author.id,
-            "created_at": utc_now().isoformat(),
-        }
-        save_voice_mutes()
-        
-        duration_text = format_timedelta(duration)
-        embed = discord.Embed(title="Выдан мут голоса", color=0xED4245, timestamp=utc_now())
-        embed.add_field(name="Участник", value=member.mention, inline=False)
-        embed.add_field(name="Модератор", value=ctx.author.mention, inline=False)
-        embed.add_field(name="Длительность", value=duration_text, inline=False)
-        embed.add_field(name="Причина", value=reason[:1024], inline=False)
-        await ctx.send(embed=embed)
-        await send_log_embed(
-            "Выдан мут голоса",
-            f"{member.mention} получил мут голоса от {ctx.author.mention}.",
-            color=0xED4245,
-            member=member,
-            fields=[("Причина", reason), ("Длительность", duration_text)],
-        )
-        
-        bot.loop.create_task(schedule_unmute_voice(member.id, duration))
-
-
-@bot.command(name="unmute-voice")
-async def unmute_voice_command(ctx: commands.Context, *, args: str = ""):
-    log_command("MODERATION", "!unmute-voice", ctx.author, ctx.guild)
+        allowed = await ensure_moderation_rights(ctx, member, "mute_members", "мут голоса")
+    except commands.CommandError as err:
+        await ctx.send(embed=make_embed("Ошибка", f"🚫 {err}", color=0xED4245))
+        return
+    if not allowed:
+        return
+    
+    # Парсим время и причину из оставшихся аргументов
+    remaining_args = " ".join(parts[1:])
+    if not remaining_args.strip():
+        await ctx.send(embed=make_embed("Ошибка", "⚠️ Укажите время мута. Например: `1h`, `30m`, `1d`", color=0xED4245))
+        return
+    
+    duration, reason = extract_duration_and_reason(remaining_args, "Нарушение правил")
+    if not duration:
+        await ctx.send(embed=make_embed("Ошибка", "⚠️ Укажите время мута. Например: `1h`, `30m`, `1d`", color=0xED4245))
+        return
+    
+    # Проверяем, находится ли пользователь в голосовом канале
+    if not member.voice or not member.voice.channel:
+        await ctx.send(embed=make_embed("Ошибка", f"⚠️ {member.mention} не находится в голосовом канале.", color=0xED4245))
+        return
+    
+    # Выдаем мут в голосовом канале
     try:
-        # Парсим аргументы: id/@mention причина
-        parts = args.strip().split()
-        if not parts:
-            await ctx.send(embed=make_embed("Использование", "`!unmute-voice <id/@user> [причина]`\nПример: `!unmute-voice @user Снятие мута`\nПример: `!unmute-voice 123456789`", color=0xFEE75C))
-            return
-        
-        # Пытаемся найти пользователя по первому аргументу
-        user_input = parts[0]
-        member = None
-        
-        # Проверяем, является ли это упоминанием
-        if user_input.startswith("<@") and user_input.endswith(">"):
-            # Это упоминание, извлекаем ID
-            user_id_str = user_input[2:-1]
-            if user_id_str.startswith("!"):
-                user_id_str = user_id_str[1:]
-            try:
-                user_id = int(user_id_str)
-                member = ctx.guild.get_member(user_id)
-            except ValueError:
-                pass
-        else:
-            # Пытаемся распарсить как ID
-            try:
-                user_id = int(user_input)
-                member = ctx.guild.get_member(user_id)
-            except ValueError:
-                pass
-        
-        if member is None:
-            await ctx.send(embed=make_embed("Ошибка", "⚠️ Пользователь не найден. Укажите ID или упомяните пользователя.", color=0xED4245))
-            return
-        
-        # Проверяем права
-        try:
-            allowed = await ensure_moderation_rights(ctx, member, "mute_members", "снятие мута голоса")
-        except commands.CommandError as err:
-            await ctx.send(embed=make_embed("Ошибка", f"🚫 {err}", color=0xED4245))
-            return
-        if not allowed:
-            return
-        
-        # Проверяем, есть ли активный мут
-        is_muted, mute_data = is_voice_muted(member.id)
-        if not is_muted:
-            await ctx.send(embed=make_embed("Нет мута", f"ℹ️ {member.mention} не имеет активного мута голоса.", color=0xFEE75C))
-            return
-        
-        # Парсим причину из оставшихся аргументов
-        reason = " ".join(parts[1:]) if len(parts) > 1 else "Снятие мута голоса"
-        
-        # Снимаем мут
-        voice_mutes.pop(member.id, None)
-        save_voice_mutes()
-        
-        # Размучиваем пользователя в голосовом канале, если он там находится
-        if member.voice and member.voice.channel:
-            try:
-                await member.edit(mute=False, reason=f"{ctx.author} — {reason}")
-            except (discord.Forbidden, discord.HTTPException) as e:
-                print(f"[Voice Mute] Не удалось размьютить {member.id}: {e}")
-        
-        embed = discord.Embed(title="Снят мут голоса", color=0x57F287, timestamp=utc_now())
-        embed.add_field(name="Участник", value=member.mention, inline=False)
-        embed.add_field(name="Модератор", value=ctx.author.mention, inline=False)
-        embed.add_field(name="Причина", value=reason[:1024], inline=False)
-        await ctx.send(embed=embed)
-        await send_log_embed(
-            "Снят мут голоса",
-            f"{member.mention} больше не имеет мута голоса.",
-            color=0x57F287,
-            member=member,
-            fields=[("Причина", reason), ("Модератор", ctx.author.mention)],
-        )
+        await member.edit(mute=True, reason=f"{ctx.author} — {reason}")
+    except discord.Forbidden:
+        await ctx.send(embed=make_embed("Ошибка", "🚫 Не удалось выдать мут. Проверьте права бота (нужно право 'Mute Members').", color=0xED4245))
+        return
+    except discord.HTTPException as e:
+        await ctx.send(embed=make_embed("Ошибка", f"🚫 Произошла ошибка при выдаче мута: {e}", color=0xED4245))
+        return
+    
+    # Сохраняем информацию о муте
+    expires_at = utc_now() + duration
+    voice_mutes[member.id] = {
+        "expires_at": expires_at.isoformat(),
+        "reason": reason,
+        "moderator_id": ctx.author.id,
+        "created_at": utc_now().isoformat(),
+    }
+    save_voice_mutes()
+    
+    duration_text = format_timedelta(duration)
+    embed = discord.Embed(title="Выдан мут голоса", color=0xED4245, timestamp=utc_now())
+    embed.add_field(name="Участник", value=member.mention, inline=False)
+    embed.add_field(name="Модератор", value=ctx.author.mention, inline=False)
+    embed.add_field(name="Длительность", value=duration_text, inline=False)
+    embed.add_field(name="Причина", value=reason[:1024], inline=False)
+    await ctx.send(embed=embed)
+    await send_log_embed(
+        "Выдан мут голоса",
+        f"{member.mention} получил мут голоса от {ctx.author.mention}.",
+        color=0xED4245,
+        member=member,
+        fields=[("Причина", reason), ("Длительность", duration_text)],
+    )
+    
+    bot.loop.create_task(schedule_unmute_voice(member.id, duration))
 
 
 @bot.command(name="warn")
