@@ -4193,6 +4193,10 @@ async def unmuteticket_command(ctx: commands.Context, member: discord.Member, *,
 @bot.command(name="mute-voice")
 async def mute_voice_command(ctx: commands.Context, *, args: str = ""):
     log_command("MODERATION", "!mute-voice", ctx.author, ctx.guild)
+    if ctx.guild is None:
+        await ctx.send(embed=make_embed("Ошибка", "🚫 Команда доступна только на сервере.", color=0xED4245))
+        return
+    
     # Парсим аргументы: id/@mention время причина
     parts = args.strip().split()
     if not parts:
@@ -4201,7 +4205,9 @@ async def mute_voice_command(ctx: commands.Context, *, args: str = ""):
     
     # Пытаемся найти пользователя по первому аргументу
     user_input = parts[0]
+    user_id = None
     member = None
+    user = None
     
     # Проверяем, является ли это упоминанием
     if user_input.startswith("<@") and user_input.endswith(">"):
@@ -4212,6 +4218,12 @@ async def mute_voice_command(ctx: commands.Context, *, args: str = ""):
         try:
             user_id = int(user_id_str)
             member = ctx.guild.get_member(user_id)
+            if member is None:
+                # Пользователя нет на сервере, пытаемся получить как User
+                try:
+                    user = await bot.fetch_user(user_id)
+                except discord.NotFound:
+                    pass
         except ValueError:
             pass
     else:
@@ -4219,21 +4231,48 @@ async def mute_voice_command(ctx: commands.Context, *, args: str = ""):
         try:
             user_id = int(user_input)
             member = ctx.guild.get_member(user_id)
+            if member is None:
+                # Пользователя нет на сервере, пытаемся получить как User
+                try:
+                    user = await bot.fetch_user(user_id)
+                except discord.NotFound:
+                    pass
         except ValueError:
             pass
     
-    if member is None:
-        await ctx.send(embed=make_embed("Ошибка", "⚠️ Пользователь не найден. Укажите ID или упомяните пользователя.", color=0xED4245))
+    if user_id is None:
+        await ctx.send(embed=make_embed("Ошибка", "⚠️ Неверный формат ID пользователя. Укажите ID или упомяните пользователя.", color=0xED4245))
         return
     
-    # Проверяем права
-    try:
-        allowed = await ensure_moderation_rights(ctx, member, "mute_members", "мут голоса")
-    except commands.CommandError as err:
-        await ctx.send(embed=make_embed("Ошибка", f"🚫 {err}", color=0xED4245))
+    # Проверяем права модератора (без проверки цели, так как её может не быть на сервере)
+    is_super = is_super_admin(ctx.author)
+    if not is_super:
+        if not has_mod_role(ctx.author):
+            await ctx.send(
+                embed=make_embed("Отказано", "Недостаточно прав. Обратитесь к администратору.", color=0xED4245),
+                delete_after=10,
+            )
+            return
+        if not ctx.author.guild_permissions.mute_members:
+            await ctx.send(embed=make_embed("Ошибка", "🚫 Ваша роль не позволяет мутить участников.", color=0xED4245))
+            return
+    
+    guild_me = ctx.guild.me
+    if guild_me is None or not guild_me.guild_permissions.mute_members:
+        await ctx.send(embed=make_embed("Ошибка", "🚫 У бота нет прав на мут (нужно право 'Mute Members').", color=0xED4245))
         return
-    if not allowed:
-        return
+    
+    # Если пользователь найден на сервере, проверяем дополнительные права
+    if member:
+        if ctx.author == member:
+            await ctx.send(embed=make_embed("Ошибка", "🚫 Нельзя применить действие к себе.", color=0xED4245))
+            return
+        if ctx.guild.owner_id != ctx.author.id and ctx.author.top_role <= member.top_role:
+            await ctx.send(embed=make_embed("Ошибка", "🚫 Нельзя наказать участника с равной или более высокой ролью.", color=0xED4245))
+            return
+        if guild_me.top_role <= member.top_role and ctx.guild.owner_id != guild_me.id:
+            await ctx.send(embed=make_embed("Ошибка", "🚫 Роль бота ниже роли цели.", color=0xED4245))
+            return
     
     # Парсим время и причину из оставшихся аргументов
     remaining_args = " ".join(parts[1:])
@@ -4246,24 +4285,20 @@ async def mute_voice_command(ctx: commands.Context, *, args: str = ""):
         await ctx.send(embed=make_embed("Ошибка", "⚠️ Укажите время мута. Например: `1h`, `30m`, `1d`", color=0xED4245))
         return
     
-    # Проверяем, находится ли пользователь в голосовом канале
-    if not member.voice or not member.voice.channel:
-        await ctx.send(embed=make_embed("Ошибка", f"⚠️ {member.mention} не находится в голосовом канале.", color=0xED4245))
-        return
+    # Если пользователь на сервере и в голосовом канале, выдаем мут сразу
+    if member and member.voice and member.voice.channel:
+        try:
+            await member.edit(mute=True, reason=f"{ctx.author} — {reason}")
+        except discord.Forbidden:
+            await ctx.send(embed=make_embed("Ошибка", "🚫 Не удалось выдать мут. Проверьте права бота (нужно право 'Mute Members').", color=0xED4245))
+            return
+        except discord.HTTPException as e:
+            await ctx.send(embed=make_embed("Ошибка", f"🚫 Произошла ошибка при выдаче мута: {e}", color=0xED4245))
+            return
     
-    # Выдаем мут в голосовом канале
-    try:
-        await member.edit(mute=True, reason=f"{ctx.author} — {reason}")
-    except discord.Forbidden:
-        await ctx.send(embed=make_embed("Ошибка", "🚫 Не удалось выдать мут. Проверьте права бота (нужно право 'Mute Members').", color=0xED4245))
-        return
-    except discord.HTTPException as e:
-        await ctx.send(embed=make_embed("Ошибка", f"🚫 Произошла ошибка при выдаче мута: {e}", color=0xED4245))
-        return
-    
-    # Сохраняем информацию о муте
+    # Сохраняем информацию о муте (даже если пользователя нет на сервере)
     expires_at = utc_now() + duration
-    voice_mutes[member.id] = {
+    voice_mutes[user_id] = {
         "expires_at": expires_at.isoformat(),
         "reason": reason,
         "moderator_id": ctx.author.id,
@@ -4272,21 +4307,40 @@ async def mute_voice_command(ctx: commands.Context, *, args: str = ""):
     save_voice_mutes()
     
     duration_text = format_timedelta(duration)
+    
+    # Формируем информацию о пользователе
+    if member:
+        user_mention = member.mention
+        user_display = f"{member} ({member.id})"
+    elif user:
+        user_mention = user.mention if hasattr(user, 'mention') else f"<@{user_id}>"
+        user_display = f"{user} ({user_id})"
+    else:
+        user_mention = f"<@{user_id}>"
+        user_display = f"Пользователь с ID {user_id}"
+    
     embed = discord.Embed(title="Выдан мут голоса", color=0xED4245, timestamp=utc_now())
-    embed.add_field(name="Участник", value=member.mention, inline=False)
+    embed.add_field(name="Участник", value=user_mention, inline=False)
     embed.add_field(name="Модератор", value=ctx.author.mention, inline=False)
     embed.add_field(name="Длительность", value=duration_text, inline=False)
     embed.add_field(name="Причина", value=reason[:1024], inline=False)
+    if not member:
+        embed.add_field(name="Статус", value="⚠️ Пользователь не на сервере. Мут будет применен автоматически при входе в голосовой канал.", inline=False)
+    elif not (member.voice and member.voice.channel):
+        embed.add_field(name="Статус", value="⚠️ Пользователь не в голосовом канале. Мут будет применен автоматически при входе в голосовой канал.", inline=False)
     await ctx.send(embed=embed)
-    await send_log_embed(
-        "Выдан мут голоса",
-        f"{member.mention} получил мут голоса от {ctx.author.mention}.",
-        color=0xED4245,
-        member=member,
-        fields=[("Причина", reason), ("Длительность", duration_text)],
-    )
     
-    bot.loop.create_task(schedule_unmute_voice(member.id, duration))
+    # Логируем только если пользователь найден
+    if member or user:
+        await send_log_embed(
+            "Выдан мут голоса",
+            f"{user_mention} получил мут голоса от {ctx.author.mention}.",
+            color=0xED4245,
+            member=member if member else (user if user else None),
+            fields=[("Причина", reason), ("Длительность", duration_text)],
+        )
+    
+    bot.loop.create_task(schedule_unmute_voice(user_id, duration))
 
 
 @bot.command(name="warn")
